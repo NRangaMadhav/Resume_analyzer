@@ -5,13 +5,11 @@ from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
-from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
 
+from backend import analyze_resume
 
 load_dotenv()
-
 
 st.set_page_config(
     page_title="ResumeMatch Pro",
@@ -19,15 +17,12 @@ st.set_page_config(
     layout="wide"
 )
 
-
 APP_TITLE = "ResumeMatch Pro"
 APP_SUBTITLE = "AI-Powered ATS Resume Analyzer"
 
 
 def extract_pdf_text(uploaded_file):
-    """
-    Extract text from uploaded PDF using PyPDFLoader.
-    """
+    """Extract text from an uploaded PDF file."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
         temp_file.write(uploaded_file.read())
         temp_path = temp_file.name
@@ -35,17 +30,13 @@ def extract_pdf_text(uploaded_file):
     try:
         loader = PyPDFLoader(temp_path)
         pages = loader.load()
-        text = "\n\n".join(page.page_content for page in pages)
-        return text
+        return "\n\n".join(page.page_content for page in pages)
     finally:
         Path(temp_path).unlink(missing_ok=True)
 
 
 def extract_score(response_text):
-    """
-    Extract ATS score from LLM response.
-    Expected format: ATS Score: X/100
-    """
+    """Extract ATS score from LLM response."""
     match = re.search(r"ATS Score:\s*(\d{1,3})\s*/\s*100", response_text, re.IGNORECASE)
     if match:
         score = int(match.group(1))
@@ -60,80 +51,7 @@ def get_score_label(score):
         return "Good Match"
     elif score >= 55:
         return "Average Match"
-    else:
-        return "Needs Improvement"
-
-
-def build_prompt(resume_text, jd_text):
-    template = """
-You are an expert ATS (Applicant Tracking System) resume reviewer and hiring manager with 10 years of recruitment experience.
-
-Analyze the resume against the provided job description.
-
-Resume:
-{resume}
-
-Job Description:
-{jd}
-
-Tasks:
-1. Calculate ATS Match Score out of 100.
-2. List matching skills found in both resume and JD.
-3. List missing skills from the JD.
-4. Identify important keywords missing from the resume.
-5. Evaluate:
-   - Technical Skills Match
-   - Experience Match
-   - Education Match
-   - Project Relevance
-6. Give detailed reasons for the score.
-7. Suggest specific improvements to increase the ATS score.
-8. Return the output in a structured format.
-
-Output Format:
-
-ATS Score: X/100
-
-Matching Skills:
-- ...
-
-Missing Skills:
-- ...
-
-Important Missing Keywords:
-- ...
-
-Strengths:
-- ...
-
-Weaknesses:
-- ...
-
-Detailed Evaluation:
-Technical Skills Match:
-Experience Match:
-Education Match:
-Project Relevance:
-
-Recommendations:
-- ...
-
-Final Verdict:
-...
-"""
-    prompt = PromptTemplate.from_template(template)
-    return prompt.format(resume=resume_text, jd=jd_text)
-
-
-def generate_analysis(llm, final_prompt):
-    response_placeholder = st.empty()
-    full_response = ""
-
-    for chunk in llm.stream(final_prompt):
-        full_response += chunk.content
-        response_placeholder.markdown(full_response)
-
-    return full_response
+    return "Needs Improvement"
 
 
 def main():
@@ -245,38 +163,33 @@ def main():
             st.error("Could not extract text from the resume PDF.")
             return
 
-        llm = ChatNVIDIA(
-            model=llm_model,
-            api_key=nvidia_api_key,
-            temperature=temperature
-        )
-
-        final_prompt = build_prompt(resume_text, jd_text)
+        with st.spinner("Analyzing resume against job description..."):
+            full_response = analyze_resume(
+                resume_text=resume_text,
+                jd_text=jd_text,
+                llm_model=llm_model,
+                api_key=nvidia_api_key,
+                temperature=temperature
+            )
 
         st.divider()
         st.markdown("## 📊 ATS Analysis Report")
-
-        with st.spinner("Analyzing resume against job description..."):
-            full_response = generate_analysis(llm, final_prompt)
+        st.markdown(full_response)
 
         score = extract_score(full_response)
-
         if score is not None:
             st.divider()
             st.markdown("## 🎯 Match Summary")
 
             metric_col1, metric_col2 = st.columns(2)
-
             with metric_col1:
                 st.metric("ATS Match Score", f"{score}/100")
-
             with metric_col2:
                 st.metric("Result", get_score_label(score))
 
             st.progress(score / 100)
 
         st.divider()
-
         st.download_button(
             label="⬇️ Download ATS Report",
             data=full_response,
