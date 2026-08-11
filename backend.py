@@ -7,7 +7,6 @@ load_dotenv()
 
 nvidia_api= os.getenv("NVIDIA_API_KEY")
 llm_model= os.getenv("NVIDIA_LLM_MODEL")
-embedding_model = os.getenv("NVIDIA_EMB_MODEL")
 
 llm=ChatNVIDIA(
     model=nvidia_api,
